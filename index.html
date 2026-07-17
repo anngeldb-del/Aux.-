@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>💰 CDP LADB</title>
+<meta name="description" content="Control de pagos del grupo: marca quién pagó, exporta a Excel y respalda tus datos.">
+<meta name="theme-color" content="#0f0f13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CDP LADB">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
@@ -263,6 +271,7 @@
       <b>Android:</b> Chrome → menú ⋮ → "Añadir a pantalla inicio"<br>
       <b>PC:</b> Guarda este archivo HTML y ábrelo con Chrome/Edge
     </div>
+    <button class="btn btn-primary" id="installNativeBtn" style="display:none;margin-top:9px" onclick="installNow()">📲 Instalar ahora</button>
   </div>
   <button class="install-close" onclick="closeBanner()" aria-label="Cerrar aviso de instalación">✕</button>
 </div>
@@ -598,10 +607,31 @@ function importJSON(e) {
   reader.readAsText(file);
 }
 
-// ── BANNER ──
+// ── BANNER / INSTALL ──
 function closeBanner() {
   document.getElementById('installBanner').style.display='none';
   try { localStorage.setItem(BKEY,'1'); } catch{}
+}
+
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const btn = document.getElementById('installNativeBtn');
+  if (btn) btn.style.display = 'inline-flex';
+});
+function installNow() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.finally(() => { deferredPrompt = null; });
+}
+window.addEventListener('appinstalled', closeBanner);
+
+// ── SERVICE WORKER (offline + instalación real; requiere http/https, no file://) ──
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
 }
 
 // ── TOAST ──
