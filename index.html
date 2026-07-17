@@ -264,22 +264,24 @@
       <b>PC:</b> Guarda este archivo HTML y ábrelo con Chrome/Edge
     </div>
   </div>
-  <button class="install-close" onclick="closeBanner()">✕</button>
+  <button class="install-close" onclick="closeBanner()" aria-label="Cerrar aviso de instalación">✕</button>
 </div>
 
 <!-- ACTIONS -->
 <div class="actions">
   <button class="btn btn-primary" onclick="openAdd()">＋ Agregar</button>
-  <button class="btn btn-success" onclick="markAll(true)">✓ Todos pagaron</button>
-  <button class="btn btn-danger"  onclick="markAll(false)">↺ Reiniciar</button>
+  <button class="btn btn-success" onclick="confirmMarkAll(true)">✓ Todos pagaron</button>
+  <button class="btn btn-danger"  onclick="confirmMarkAll(false)">↺ Reiniciar</button>
   <button class="btn btn-ghost"   onclick="openExport()">📋 Exportar</button>
+  <button class="btn btn-ghost"   onclick="document.getElementById('importFile').click()">📥 Importar</button>
+  <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importJSON(event)">
 </div>
 
 <!-- SEARCH -->
 <div class="search-wrap">
   <div class="search-rel">
     <span class="search-icon">🔍</span>
-    <input class="search-input" id="search" type="text" placeholder="Buscar nombre..." oninput="render()">
+    <input class="search-input" id="search" type="text" aria-label="Buscar nombre" placeholder="Buscar nombre..." oninput="render()">
   </div>
 </div>
 
@@ -300,15 +302,15 @@
   </div>
 </div>
 
-<!-- CONFIRM DELETE -->
+<!-- CONFIRM -->
 <div class="confirm-overlay" id="confirmModal">
   <div class="confirm-box">
-    <div class="confirm-icon">🗑️</div>
-    <div class="confirm-title">¿Eliminar persona?</div>
+    <div class="confirm-icon" id="confirmIcon">🗑️</div>
+    <div class="confirm-title" id="confirmTitle">¿Eliminar persona?</div>
     <div class="confirm-msg" id="confirmMsg">Esta acción no se puede deshacer.</div>
     <div class="row">
       <button class="btn btn-ghost" onclick="closeConfirm()">Cancelar</button>
-      <button class="btn btn-danger" onclick="doDelete()">Eliminar</button>
+      <button class="btn btn-danger" id="confirmBtn" onclick="runConfirm()">Eliminar</button>
     </div>
   </div>
 </div>
@@ -330,6 +332,9 @@
       2. Abre Excel o Google Sheets<br>
       3. Clic en celda <b>A1</b> → pega con <b>Ctrl+V</b><br>
       ✅ Los datos quedan en columnas automáticamente
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn btn-ghost" onclick="downloadBackup()">💾 Descargar respaldo (.json)</button>
     </div>
   </div>
 </div>
@@ -356,7 +361,7 @@ const BKEY  = 'pagos_banner_closed';
 //  STATE
 // ──────────────────────────────────────────────
 let people = [];
-let delTarget = null;
+let confirmAction = null;
 
 // ──────────────────────────────────────────────
 //  STORAGE  (localStorage — persiste en el navegador)
@@ -387,6 +392,9 @@ function uid() { return Date.now().toString(36) + Math.random().toString(36).sli
 // ──────────────────────────────────────────────
 function initials(n) { return n.split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase().slice(0,2); }
 
+const ESCAPE_MAP = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ESCAPE_MAP[c]); }
+
 function fmt(ts) {
   if (!ts) return '';
   const d = new Date(ts);
@@ -397,8 +405,9 @@ function fmt(ts) {
 function render() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   const filtered = q ? people.filter(p=>p.name.toLowerCase().includes(q)) : people;
-  const unpaid = filtered.filter(p=>!p.paid);
-  const paid   = filtered.filter(p=>p.paid);
+  const byName = (a,b) => a.name.localeCompare(b.name, 'es');
+  const unpaid = filtered.filter(p=>!p.paid).sort(byName);
+  const paid   = filtered.filter(p=>p.paid).sort(byName);
 
   let html = '';
   if (!filtered.length) {
@@ -420,18 +429,20 @@ function render() {
 function cardHTML(p) {
   const cls  = p.paid ? 'paid' : '';
   const chk  = p.paid ? '✓' : '';
+  const safeName = escapeHtml(p.name);
+  const safeInit = escapeHtml(initials(p.name));
   const stat = p.paid
     ? `<span style="font-size:.65rem;background:rgba(0,229,160,.12);color:var(--accent2);border:1px solid rgba(0,229,160,.3);border-radius:5px;padding:1px 6px;">✓ Pagó ${fmt(p.paidAt)}</span>`
     : `<span style="color:var(--muted)">Sin pago registrado</span>`;
   return `
     <div class="card ${cls}">
-      <div class="avatar">${initials(p.name)}</div>
+      <div class="avatar">${safeInit}</div>
       <div class="info">
-        <div class="name">${p.name}</div>
+        <div class="name">${safeName}</div>
         <div class="status">${stat}</div>
       </div>
-      <button class="check-btn" onclick="toggle('${p.id}')">${chk}</button>
-      <button class="del-btn"   onclick="askDel('${p.id}')">✕</button>
+      <button class="check-btn" onclick="toggle('${p.id}')" aria-label="${p.paid ? 'Desmarcar' : 'Marcar como pagado'}: ${safeName}">${chk}</button>
+      <button class="del-btn"   onclick="askDel('${p.id}')" aria-label="Eliminar a ${safeName}">✕</button>
     </div>`;
 }
 
@@ -462,6 +473,15 @@ function markAll(paid) {
   toast(paid ? '✅ Todos marcados' : '↺ Lista reiniciada');
 }
 
+function confirmMarkAll(paid) {
+  if (!people.length) return;
+  const title = paid ? '✓ ¿Marcar todos como pagados?' : '↺ ¿Reiniciar la lista?';
+  const msg = paid
+    ? `Se marcarán las ${people.length} personas como pagadas.`
+    : `Se borrará el estado de pago de las ${people.length} personas. No se puede deshacer.`;
+  openConfirm(title, msg, paid ? 'Marcar todos' : 'Reiniciar', () => markAll(paid), paid ? '✅' : '↺');
+}
+
 // ── ADD ──
 function openAdd() {
   document.getElementById('addModal').classList.add('open');
@@ -472,8 +492,12 @@ function closeAdd() {
   document.getElementById('newName').value = '';
 }
 function doAdd() {
-  const v = document.getElementById('newName').value.trim().toUpperCase();
+  const v = document.getElementById('newName').value.trim().replace(/\s+/g,' ').toUpperCase();
   if (!v) return;
+  if (people.some(p => p.name === v)) {
+    toast(`⚠️ "${v}" ya está en la lista`);
+    return;
+  }
   people.push({ id: uid(), name: v, paid: false, paidAt: null });
   save(); render(); closeAdd();
   toast(`➕ ${v} agregado`);
@@ -481,20 +505,32 @@ function doAdd() {
 
 // ── DELETE ──
 function askDel(id) {
-  delTarget = id;
   const p = people.find(x=>x.id===id);
-  document.getElementById('confirmMsg').textContent = `¿Eliminar a "${p?.name}"? No se puede deshacer.`;
+  if (!p) return;
+  openConfirm('🗑️ ¿Eliminar persona?', `¿Eliminar a "${p.name}"? No se puede deshacer.`, 'Eliminar', () => {
+    people = people.filter(x=>x.id!==id);
+    save(); render();
+    toast(`🗑️ ${p.name} eliminado`);
+  });
+}
+
+// ── CONFIRM (generic) ──
+function openConfirm(title, msg, btnText, action, icon) {
+  document.getElementById('confirmIcon').textContent = icon || '⚠️';
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmMsg').textContent = msg;
+  document.getElementById('confirmBtn').textContent = btnText;
+  confirmAction = action;
   document.getElementById('confirmModal').classList.add('open');
 }
 function closeConfirm() {
   document.getElementById('confirmModal').classList.remove('open');
-  delTarget = null;
+  confirmAction = null;
 }
-function doDelete() {
-  const p = people.find(x=>x.id===delTarget);
-  people = people.filter(x=>x.id!==delTarget);
-  save(); render(); closeConfirm();
-  if (p) toast(`🗑️ ${p.name} eliminado`);
+function runConfirm() {
+  const action = confirmAction;
+  closeConfirm();
+  if (action) action();
 }
 
 // ── EXPORT ──
@@ -512,6 +548,54 @@ function copyText() {
   if (navigator.clipboard) {
     navigator.clipboard.writeText(t.value).then(()=>toast('✅ ¡Copiado! Pega en Excel'));
   } else { document.execCommand('copy'); toast('✅ ¡Copiado!'); }
+}
+
+// ── BACKUP / RESTORE (JSON) ──
+function downloadBackup() {
+  const blob = new Blob([JSON.stringify(people, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `pagos_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('💾 Respaldo descargado');
+}
+
+function importJSON(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try {
+      data = JSON.parse(reader.result);
+      if (!Array.isArray(data) || !data.every(p => p && typeof p.name === 'string')) {
+        throw new Error('formato inválido');
+      }
+    } catch (err) {
+      toast('⚠️ Archivo inválido o dañado');
+      return;
+    }
+    openConfirm(
+      '📥 ¿Importar respaldo?',
+      `Esto reemplazará los ${people.length} registros actuales por ${data.length} del archivo. No se puede deshacer.`,
+      'Importar',
+      () => {
+        people = data.map(p => ({
+          id: typeof p.id === 'string' ? p.id : uid(),
+          name: String(p.name).trim().toUpperCase(),
+          paid: !!p.paid,
+          paidAt: typeof p.paidAt === 'number' ? p.paidAt : null
+        }));
+        save(); render();
+        toast('✅ Respaldo importado');
+      },
+      '📥'
+    );
+  };
+  reader.readAsText(file);
 }
 
 // ── BANNER ──
@@ -533,6 +617,17 @@ function toast(msg) {
   document.getElementById(id).addEventListener('click', function(e){
     if (e.target===this) this.classList.remove('open');
   });
+});
+document.getElementById('confirmModal').addEventListener('click', function(e){
+  if (e.target===this) closeConfirm();
+});
+
+// ── CLOSE ON ESCAPE ──
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('addModal').classList.contains('open')) closeAdd();
+  else if (document.getElementById('exportModal').classList.contains('open')) closeExport();
+  else if (document.getElementById('confirmModal').classList.contains('open')) closeConfirm();
 });
 
 // ──────────────────────────────────────────────
